@@ -1,0 +1,20 @@
+services:
+  securecapita:
+    container_name: api_appinstallatori_de
+    build: .
+    image: api_appinstallatori_de
+    ports: 
+      - 8444:8444
+    expose:
+      - 8444
+    networks:
+      - net1
+    volumes:
+      - /home/DES/GESTIONE/app_installatori:/usr/src/app/uploads
+
+networks:
+  net1:
+    name: backend_internalnet
+    external: true
+
+

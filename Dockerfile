@@ -9,7 +9,7 @@ RUN npm install\
 
 COPY . .
 
-EXPOSE 8444
+EXPOSE 8446
 
 CMD npm run build && pm2-runtime dist/app.js
 

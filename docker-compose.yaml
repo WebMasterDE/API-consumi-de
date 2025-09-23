@@ -1,16 +1,14 @@
 services:
   securecapita:
-    container_name: api_appinstallatori_de
+    container_name: api_consumi_de
     build: .
     image: api_appinstallatori_de
     ports: 
-      - 8444:8444
+      - 8446:8446
     expose:
-      - 8444
+      - 8446
     networks:
       - net1
-    volumes:
-      - /home/DES/GESTIONE/app_installatori:/usr/src/app/uploads
 
 networks:
   net1:

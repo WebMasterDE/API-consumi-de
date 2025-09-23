@@ -22,7 +22,7 @@ export class utenti extends Model<utentiAttributes, utentiCreationAttributes> im
     return utenti.init({
     id: {
       autoIncrement: true,
-      type: DataTypes.INTEGER.UNSIGNED,
+      type: DataTypes.INTEGER,
       allowNull: false,
       primaryKey: true
     },

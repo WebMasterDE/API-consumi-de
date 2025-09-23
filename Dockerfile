@@ -5,7 +5,8 @@ COPY package*.json ./
 
 RUN npm install\
     && npm install pm2 -g \
-    && npm install -g typescript
+    && npm install -g typescript \
+    && npm install pg
 
 COPY . .
 

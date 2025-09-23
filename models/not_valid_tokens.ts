@@ -24,12 +24,12 @@ export class not_valid_tokens extends Model<not_valid_tokensAttributes, not_vali
     return not_valid_tokens.init({
     id: {
       autoIncrement: true,
-      type: DataTypes.INTEGER.UNSIGNED,
+      type: DataTypes.INTEGER,
       allowNull: false,
       primaryKey: true
     },
     id_utente: {
-      type: DataTypes.INTEGER.UNSIGNED,
+      type: DataTypes.INTEGER,
       allowNull: false
     },
     token: {

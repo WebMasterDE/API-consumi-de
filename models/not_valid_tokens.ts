@@ -43,21 +43,20 @@ export class not_valid_tokens extends Model<not_valid_tokensAttributes, not_vali
   }, {
     sequelize,
     tableName: 'not_valid_tokens',
+    schema: 'public',
     timestamps: false,
     indexes: [
       {
-        name: "PRIMARY",
-        unique: true,
-        using: "BTREE",
+        name: "fk_not_valid_tokens_utenti",
         fields: [
-          { name: "id" },
+          { name: "id_utente" },
         ]
       },
       {
-        name: "fk_not_valid_tokens_utenti",
-        using: "BTREE",
+        name: "not_valid_tokens_pkey",
+        unique: true,
         fields: [
-          { name: "id_utente" },
+          { name: "id" },
         ]
       },
     ]

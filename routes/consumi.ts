@@ -5,7 +5,7 @@ import { letture_inverter } from '../models/letture_inverter';
 
 import WebSocket from 'ws';
 
-const wss = new WebSocket.Server({ port: 52665 });
+const wss = new WebSocket.Server({ port: 8446 });
 
 let wsDisponibili: any[] = [];
 

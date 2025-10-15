@@ -1,36 +1,102 @@
 import { authorize, Role } from '../app';
 import axios from 'axios';
+import { tipo_dato } from '../models/tipo_dato';
+import { letture_inverter } from '../models/letture_inverter';
+
+let accessToken: string = '5a0d4948-5676-4400-ac58-12498a81d2fe';
+let refreshToken: string = '657e20c0-c881-4537-b762-e6194a42c9d5';
 
 module.exports = function (app: any) {
     app.get('/api/v1/consumi', authorize([Role.Visualizzatore]), async (req: any, res: any) => {
         return res.status(200).json({ error: false, message: "Elenco consumi", data: [] });
     });
 
-    app.get("/oauth/callback", async (req: any, res: any) => {
-        const { code } = req.query;
-        if (!code) return res.status(400).send("Missing authorization code");
+    let isFetching = false;
+
+    async function getconsumi() {
+        if (isFetching) {
+            console.log("Chiamata già in corso, salto questa esecuzione.");
+            return;
+        }
+
+        isFetching = true;
+
         try {
+            console.log("Executing https request to fetch real-time data...".yellow);
             const response = await axios.post(
-                "https://gateway.isolarcloud.eu/openapi/apiManage/token",
+                'https://gateway.isolarcloud.eu/openapi/platform/getPowerStationRealTimeData',
                 {
-                    appkey: process.env.APP_ID,
-                    grant_type: "authorization_code",
-                    code: code,
-                    redirect_uri: process.env.REDIRECT_URI,
+                    "appkey": process.env.APP_ID,
+                    "is_get_point_dict": "1",
+                    "point_id_list": ["83022", "83024", "83033", "83004", "83009", "83025", "83102", "83118", "83124", "83075"],
+                    "ps_id_list": ["5873067"]
                 },
                 {
                     headers: {
-                        "Content-Type": "application/json",
-                        "x-access-key": process.env.SECRET_KEY!,
-                    },
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                        'x-access-key': process.env.SECRET_KEY,
+                    }
                 }
-            );
-            return res.status(200).json(response.data);
+            ).catch(error => {
+                if (error.response && error.response.status === 401) {
+                    console.warn("Access token expired, refreshing...");
+                    refreshAccessToken();
+                } else {
+                    console.error("Error fetching real-time data:", error);
+                }
+            }).then(response => {
+                let letture = response!.data.result_data.device_point_list[0];
+
+                for (let key in letture) {
+                    if (key.startsWith('p')) {
+                        tipo_dato.findOne({ where: { codice: key } }).then(td => {
+                            if (td) {
+                                const now = new Date();
+                                const oraItaliana = now.setHours(now.getHours() + 2);
+                                letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
+                            }
+                        });
+                    }
+                }
+            }).finally(() => {
+                isFetching = false;
+            });
         } catch (error) {
-            console.error("Error exchanging code for token:", error);
-            return res.status(500).send("Error exchanging code for token");
+            console.error("Unexpected error:", error);
+            isFetching = false;
         }
 
+    }
 
-    });
-};
+    setInterval(getconsumi, 5 * 60 * 1000);
+
+    getconsumi();
+
+
+
+    async function refreshAccessToken() {
+        axios.post(
+            "https://gateway.isolarcloud.eu/openapi/apiManage/refreshToken",
+            {
+                "refresh_token": refreshToken,
+                "appkey": process.env.APP_ID,
+                "secret_key": process.env.SECRET_KEY,
+                "sys_code": 207
+            },
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-access-key": process.env.SECRET_KEY,
+                },
+            }
+        ).then(response => {
+            accessToken = response.data.access_token;
+            refreshToken = response.data.refresh_token;
+            console.log("Access token refreshed:", accessToken);
+        }).catch(error => {
+            console.error("Error refreshing access token:", error);
+        });
+    }
+
+}

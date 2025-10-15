@@ -30,7 +30,8 @@
     "passport-local": "^1.0.0",
     "pg": "^8.16.3",
     "sequelize": "^6.37.5",
-    "sequelize-auto": "^0.8.8"
+    "sequelize-auto": "^0.8.8",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
@@ -43,6 +44,7 @@
     "@types/passport-http": "^0.3.11",
     "@types/sequelize": "^4.28.20",
     "@types/swagger-jsdoc": "^6.0.4",
+    "@types/ws": "^8.18.1",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"

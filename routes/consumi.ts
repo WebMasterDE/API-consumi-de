@@ -3,15 +3,32 @@ import axios from 'axios';
 import { tipo_dato } from '../models/tipo_dato';
 import { letture_inverter } from '../models/letture_inverter';
 
+import WebSocket from 'ws';
+
+const wss = new WebSocket.Server({ port: 52665 });
+
+let wsDisponibili: any[] = [];
+
 let accessToken: string = '5a0d4948-5676-4400-ac58-12498a81d2fe';
 let refreshToken: string = '657e20c0-c881-4537-b762-e6194a42c9d5';
+let isFetching = false;
+
 
 module.exports = function (app: any) {
+
+    wss.on('connection', (ws) => {
+        console.log('WS Client connected'.green);
+        wsDisponibili.push(ws);
+        ws.on('close', () => {
+            console.log('WS Client disconnected'.red);
+            wsDisponibili = wsDisponibili.filter(wsItem => wsItem !== ws);
+        });
+    });
+
+
     app.get('/api/v1/consumi', authorize([Role.Visualizzatore]), async (req: any, res: any) => {
         return res.status(200).json({ error: false, message: "Elenco consumi", data: [] });
     });
-
-    let isFetching = false;
 
     async function getconsumi() {
         if (isFetching) {
@@ -60,6 +77,11 @@ module.exports = function (app: any) {
                     }
                 }
             }).finally(() => {
+                wsDisponibili.forEach(ws => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send("update");
+                    }
+                });
                 isFetching = false;
             });
         } catch (error) {
@@ -72,6 +94,8 @@ module.exports = function (app: any) {
     setInterval(getconsumi, 5 * 60 * 1000);
 
     getconsumi();
+
+
 
 
 

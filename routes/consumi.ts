@@ -9,8 +9,8 @@ const wss = new WebSocket.Server({ port: 8446 });
 
 let wsDisponibili: any[] = [];
 
-let accessToken: string = '5a0d4948-5676-4400-ac58-12498a81d2fe';
-let refreshToken: string = '657e20c0-c881-4537-b762-e6194a42c9d5';
+let accessToken: string = 'c1a3bb69-4b89-43e2-86bb-53a608731f52';
+let refreshToken: string = '79b985e3-2ad2-4ddf-b11b-3563bdde23a6';
 let isFetching = false;
 
 

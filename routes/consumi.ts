@@ -1,9 +1,10 @@
-import { authorize, Role } from '../app';
+import { authorize, Role, sequelize_consumi_de } from '../app';
 import axios from 'axios';
 import { tipo_dato } from '../models/tipo_dato';
 import { letture_inverter } from '../models/letture_inverter';
 import WebSocket from 'ws';
 import { token_sungrow } from '../models/token_sungrow';
+import { QueryTypes } from 'sequelize';
 
 const wss = new WebSocket.Server({ port: 8446 });
 
@@ -25,7 +26,37 @@ module.exports = function (app: any) {
 
 
     app.get('/api/v1/consumi', authorize([Role.Visualizzatore]), async (req: any, res: any) => {
-        return res.status(200).json({ error: false, message: "Elenco consumi", data: [] });
+        const results = await sequelize_consumi_de.query(`
+                                                          SELECT DISTINCT ON (id_dato)
+                                                            letture_inverter.id,
+                                                            nome,
+                                                            valore,
+                                                            unita_misura,
+                                                            data_lettura,
+                                                            tipo_dato.id as tipo_dato
+                                                          FROM letture_inverter
+                                                          JOIN tipo_dato ON letture_inverter.id_dato = tipo_dato.id
+                                                          ORDER BY id_dato, data_lettura DESC
+                                                        `,
+            {
+                type: QueryTypes.SELECT
+            });
+
+        const dati_grafico = await sequelize_consumi_de.query(`SELECT *
+                                                               FROM letture_inverter
+                                                               WHERE id_dato = 4
+                                                               AND data_lettura::date = current_date
+                                                               ORDER BY data_lettura DESC;`,
+            {
+                type: QueryTypes.SELECT
+            });
+        console.log(dati_grafico);
+        return res.status(200).json({
+            error: false, message: "", data: [
+                { latestReadings: results },
+                { graphData: dati_grafico }
+            ]
+        });
     });
 
     async function getconsumi() {
@@ -80,7 +111,7 @@ module.exports = function (app: any) {
                                 const now = new Date();
                                 const oraItaliana = now.setHours(now.getHours() + 2);
                                 console.log(`Saving data for ${key}: ${letture[key]} at ${new Date(oraItaliana).toISOString()}`);
-                                // letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
+                                letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
                             }
                         });
                     }
@@ -100,9 +131,9 @@ module.exports = function (app: any) {
 
     }
 
-    setInterval(getconsumi, 5 * 60 * 1000);
+    // setInterval(getconsumi, 5 * 60 * 1000);
 
-    getconsumi();
+    // getconsumi();
 
 
 

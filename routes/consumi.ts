@@ -2,15 +2,13 @@ import { authorize, Role } from '../app';
 import axios from 'axios';
 import { tipo_dato } from '../models/tipo_dato';
 import { letture_inverter } from '../models/letture_inverter';
-
 import WebSocket from 'ws';
+import { token_sungrow } from '../models/token_sungrow';
 
 const wss = new WebSocket.Server({ port: 8446 });
 
 let wsDisponibili: any[] = [];
 
-let accessToken: string = 'c1a3bb69-4b89-43e2-86bb-53a608731f52';
-let refreshToken: string = '79b985e3-2ad2-4ddf-b11b-3563bdde23a6';
 let isFetching = false;
 
 
@@ -40,6 +38,12 @@ module.exports = function (app: any) {
 
         try {
             console.log("Executing https request to fetch real-time data...".yellow);
+            let tokenRecord = await token_sungrow.findAll();
+            if (!tokenRecord) {
+                console.error("No token record found in database.");
+                isFetching = false;
+                return;
+            }
             const response = await axios.post(
                 'https://gateway.isolarcloud.eu/openapi/platform/getPowerStationRealTimeData',
                 {
@@ -50,7 +54,7 @@ module.exports = function (app: any) {
                 },
                 {
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`,
+                        'Authorization': `Bearer ${tokenRecord[0].access_token}`,
                         'Content-Type': 'application/json',
                         'x-access-key': process.env.SECRET_KEY,
                     }
@@ -63,6 +67,10 @@ module.exports = function (app: any) {
                     console.error("Error fetching real-time data:", error);
                 }
             }).then(response => {
+                if (!response) {
+                    isFetching = false;
+                    return;
+                }
                 let letture = response!.data.result_data.device_point_list[0];
 
                 for (let key in letture) {
@@ -71,7 +79,8 @@ module.exports = function (app: any) {
                             if (td) {
                                 const now = new Date();
                                 const oraItaliana = now.setHours(now.getHours() + 2);
-                                letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
+                                console.log(`Saving data for ${key}: ${letture[key]} at ${new Date(oraItaliana).toISOString()}`);
+                                // letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
                             }
                         });
                     }
@@ -100,27 +109,35 @@ module.exports = function (app: any) {
 
 
     async function refreshAccessToken() {
-        axios.post(
-            "https://gateway.isolarcloud.eu/openapi/apiManage/refreshToken",
-            {
-                "refresh_token": refreshToken,
-                "appkey": process.env.APP_ID,
-                "secret_key": process.env.SECRET_KEY,
-                "sys_code": 207
-            },
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-access-key": process.env.SECRET_KEY,
+        let tokenRecord = await token_sungrow.findAll();
+        console.log(tokenRecord);
+        if (tokenRecord) {
+            axios.post(
+                "https://gateway.isolarcloud.eu/openapi/apiManage/refreshToken",
+                {
+                    "refresh_token": tokenRecord[0].refresh_token,
+                    "appkey": process.env.APP_ID,
+                    "secret_key": process.env.SECRET_KEY,
+                    "sys_code": 207
                 },
-            }
-        ).then(response => {
-            accessToken = response.data.access_token;
-            refreshToken = response.data.refresh_token;
-            console.log("Access token refreshed:", accessToken);
-        }).catch(error => {
-            console.error("Error refreshing access token:", error);
-        });
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-access-key": process.env.SECRET_KEY,
+                    },
+                }
+            ).then(response => {
+                let accessToken = response.data.access_token;
+                let refreshToken = response.data.refresh_token;
+                console.log(response);
+                token_sungrow.destroy({ where: {} }).then(() => {
+                    token_sungrow.create({ access_token: accessToken, refresh_token: refreshToken });
+                });
+                console.log("Access token refreshed:", accessToken);
+            }).catch(error => {
+                console.error("Error refreshing access token:", error);
+            });
+        }
     }
 
 }

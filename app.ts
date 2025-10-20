@@ -7,7 +7,7 @@ import passportHTTP from 'passport-http';
 import passport from 'passport';
 import { utenti } from './models/utenti';
 import bcrypt from 'bcrypt';
-import { initModels } from "./models/init-models";
+import { initModels, token_sungrow } from "./models/init-models";
 import path from 'path';
 import helmet from "helmet";
 import cors from "cors";
@@ -41,7 +41,7 @@ export const sequelize_consumi_de = new Sequelize(
     process.env.PW_DB,
     {
         host: process.env.DB_HOST,
-        port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
+        port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 5432,
         dialect: 'postgres',
         logging: process.env.NODE_ENV === 'production' ? false : console.log,
         pool: {

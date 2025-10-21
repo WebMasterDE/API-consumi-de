@@ -28,12 +28,13 @@ module.exports = function (app: any) {
     app.get('/api/v1/consumi', authorize([Role.Visualizzatore]), async (req: any, res: any) => {
         const results = await sequelize_consumi_de.query(`
                                                           SELECT DISTINCT ON (id_dato)
-                                                            letture_inverter.id,
-                                                            nome,
-                                                            valore,
-                                                            unita_misura,
-                                                            data_lettura,
-                                                            tipo_dato.id as tipo_dato
+                                                          letture_inverter.id,
+                                                          nome,
+                                                          valore,
+                                                          unita_misura,
+                                                          data_lettura,
+                                                          tipo_dato.id as tipo_dato,
+                                                          tipo_dato.icona as icona
                                                           FROM letture_inverter
                                                           JOIN tipo_dato ON letture_inverter.id_dato = tipo_dato.id
                                                           ORDER BY id_dato, data_lettura DESC
@@ -42,11 +43,12 @@ module.exports = function (app: any) {
                 type: QueryTypes.SELECT
             });
 
-        const dati_grafico = await sequelize_consumi_de.query(`SELECT *
+        const dati_grafico = await sequelize_consumi_de.query(`SELECT letture_inverter.id, letture_inverter.valore as valore, letture_inverter.data_lettura as data_lettura, 'kWh' as unita_misura
                                                                FROM letture_inverter
+                                                               JOIN tipo_dato ON letture_inverter.id_dato = tipo_dato.id
                                                                WHERE id_dato = 4
                                                                AND data_lettura::date = current_date
-                                                               ORDER BY data_lettura DESC;`,
+                                                               ORDER BY data_lettura ASC;`,
             {
                 type: QueryTypes.SELECT
             });
@@ -111,7 +113,7 @@ module.exports = function (app: any) {
                                 const now = new Date();
                                 const oraItaliana = now.setHours(now.getHours() + 2);
                                 console.log(`Saving data for ${key}: ${letture[key]} at ${new Date(oraItaliana).toISOString()}`);
-                                letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
+                                // letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
                             }
                         });
                     }

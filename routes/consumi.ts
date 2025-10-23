@@ -113,7 +113,7 @@ module.exports = function (app: any) {
                                 const now = new Date();
                                 const oraItaliana = now.setHours(now.getHours() + 2);
                                 console.log(`Saving data for ${key}: ${letture[key]} at ${new Date(oraItaliana).toISOString()}`);
-                                // letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
+                                letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
                             }
                         });
                     }
@@ -133,9 +133,9 @@ module.exports = function (app: any) {
 
     }
 
-    // setInterval(getconsumi, 5 * 60 * 1000);
+    setInterval(getconsumi, 5 * 60 * 1000);
 
-    // getconsumi();
+    getconsumi();
 
 
 

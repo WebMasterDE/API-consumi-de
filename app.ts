@@ -12,6 +12,8 @@ import path from 'path';
 import helmet from "helmet";
 import cors from "cors";
 import * as http from "http";
+import WebSocket from 'ws';
+
 import { env } from 'process';
 
 
@@ -186,11 +188,20 @@ app.use(async function (err: any, req: any, res: any, next: any) {
     });
 });
 
+let wsDisponibili: any[] = [];
 sequelize_consumi_de.authenticate()
     .then(() => {
         let server = http.createServer(app);
         const PORT = 3000;
         server.listen(PORT, () => {
+            const wss = new WebSocket.Server({ server }).on('connection', (ws) => {
+                console.log('WS Client connected'.green);
+                wsDisponibili.push(ws);
+                ws.on('close', () => {
+                    console.log('WS Client disconnected'.red);
+                    wsDisponibili = wsDisponibili.filter(wsItem => wsItem !== ws);
+                });
+            });
             console.log(`Server is running on ${PORT}`.green);
         });
 
@@ -199,7 +210,7 @@ sequelize_consumi_de.authenticate()
         console.error(process.env.DB_NAME);
         console.error('Unable to connect to the database:', err);
     });
-
+export { wsDisponibili };
 
 
 

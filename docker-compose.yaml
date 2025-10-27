@@ -2,9 +2,9 @@ services:
   securecapita:
     container_name: api_consumi_de
     build: .
-    image: api_appinstallatori_de
+    image: api_consumi_de
     ports: 
-      - 8446:8446
+      - 8446:3000
     expose:
       - 8446
     networks:

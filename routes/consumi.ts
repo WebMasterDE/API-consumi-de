@@ -1,4 +1,4 @@
-import { authorize, Role, sequelize_consumi_de } from '../app';
+import { authorize, Role, sequelize_consumi_de, wsDisponibili } from '../app';
 import axios from 'axios';
 import { tipo_dato } from '../models/tipo_dato';
 import { letture_inverter } from '../models/letture_inverter';
@@ -6,23 +6,12 @@ import WebSocket from 'ws';
 import { token_sungrow } from '../models/token_sungrow';
 import { QueryTypes } from 'sequelize';
 
-const wss = new WebSocket.Server({ port: 8446 });
-
-let wsDisponibili: any[] = [];
 
 let isFetching = false;
 
 
 module.exports = function (app: any) {
 
-    wss.on('connection', (ws) => {
-        console.log('WS Client connected'.green);
-        wsDisponibili.push(ws);
-        ws.on('close', () => {
-            console.log('WS Client disconnected'.red);
-            wsDisponibili = wsDisponibili.filter(wsItem => wsItem !== ws);
-        });
-    });
 
 
     app.get('/api/v1/consumi', authorize([Role.Visualizzatore]), async (req: any, res: any) => {

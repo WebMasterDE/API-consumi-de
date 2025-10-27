@@ -100,7 +100,7 @@ module.exports = function (app: any) {
                         tipo_dato.findOne({ where: { codice: key } }).then(td => {
                             if (td) {
                                 const now = new Date();
-                                const oraItaliana = now.setHours(now.getHours() + 2);
+                                const oraItaliana = now.setHours(now.getHours() + 1);
                                 console.log(`Saving data for ${key}: ${letture[key]} at ${new Date(oraItaliana).toISOString()}`);
                                 letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
                             }

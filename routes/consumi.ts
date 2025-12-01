@@ -1,4 +1,4 @@
-import { authorize, Role, sequelize_consumi_de } from '../app';
+import { authorize, Role, sequelize_consumi_de, wsDisponibili } from '../app';
 import axios from 'axios';
 import { tipo_dato } from '../models/tipo_dato';
 import { letture_inverter } from '../models/letture_inverter';
@@ -6,23 +6,12 @@ import WebSocket from 'ws';
 import { token_sungrow } from '../models/token_sungrow';
 import { QueryTypes } from 'sequelize';
 
-const wss = new WebSocket.Server({ port: 8446 });
-
-let wsDisponibili: any[] = [];
 
 let isFetching = false;
 
 
 module.exports = function (app: any) {
 
-    wss.on('connection', (ws) => {
-        console.log('WS Client connected'.green);
-        wsDisponibili.push(ws);
-        ws.on('close', () => {
-            console.log('WS Client disconnected'.red);
-            wsDisponibili = wsDisponibili.filter(wsItem => wsItem !== ws);
-        });
-    });
 
 
     app.get('/api/v1/consumi', authorize([Role.Visualizzatore]), async (req: any, res: any) => {
@@ -43,15 +32,14 @@ module.exports = function (app: any) {
                 type: QueryTypes.SELECT
             });
 
-        const dati_grafico = await sequelize_consumi_de.query(`SELECT letture_inverter.id, letture_inverter.valore as valore, letture_inverter.data_lettura as data_lettura, 'kWh' as unita_misura
+        const dati_grafico = await sequelize_consumi_de.query(`SELECT letture_inverter.id, letture_inverter.valore AS valore, letture_inverter.data_lettura AS data_lettura, 'kW' AS unita_misura, letture_inverter.id_dato
                                                                FROM letture_inverter
                                                                JOIN tipo_dato ON letture_inverter.id_dato = tipo_dato.id
-                                                               WHERE id_dato = 4
-                                                               AND data_lettura::date = current_date
+                                                               WHERE id_dato IN (4, 9) AND data_lettura::date = current_date
                                                                ORDER BY data_lettura ASC;`,
-            {
-                type: QueryTypes.SELECT
-            });
+        {
+            type: QueryTypes.SELECT
+        });
         console.log(dati_grafico);
         return res.status(200).json({
             error: false, message: "", data: [
@@ -82,7 +70,7 @@ module.exports = function (app: any) {
                 {
                     "appkey": process.env.APP_ID,
                     "is_get_point_dict": "1",
-                    "point_id_list": ["83022", "83024", "83033", "83004", "83009", "83025", "83102", "83118", "83124", "83075"],
+                    "point_id_list": ["83022", "83024", "83033", "83004", "83009", "83025", "83102", "83118", "83124", "83075", "83106"],
                     "ps_id_list": ["5873067"]
                 },
                 {
@@ -111,7 +99,7 @@ module.exports = function (app: any) {
                         tipo_dato.findOne({ where: { codice: key } }).then(td => {
                             if (td) {
                                 const now = new Date();
-                                const oraItaliana = now.setHours(now.getHours() + 2);
+                                const oraItaliana = now.setHours(now.getHours() + 1);
                                 console.log(`Saving data for ${key}: ${letture[key]} at ${new Date(oraItaliana).toISOString()}`);
                                 letture_inverter.create({ id_dato: td.id, valore: letture[key], data_lettura: new Date(oraItaliana) });
                             }

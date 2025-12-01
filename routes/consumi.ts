@@ -32,15 +32,14 @@ module.exports = function (app: any) {
                 type: QueryTypes.SELECT
             });
 
-        const dati_grafico = await sequelize_consumi_de.query(`SELECT letture_inverter.id, letture_inverter.valore as valore, letture_inverter.data_lettura as data_lettura, 'kWh' as unita_misura
+        const dati_grafico = await sequelize_consumi_de.query(`SELECT letture_inverter.id, letture_inverter.valore AS valore, letture_inverter.data_lettura AS data_lettura, 'kW' AS unita_misura, letture_inverter.id_dato
                                                                FROM letture_inverter
                                                                JOIN tipo_dato ON letture_inverter.id_dato = tipo_dato.id
-                                                               WHERE id_dato = 4
-                                                               AND data_lettura::date = current_date
+                                                               WHERE id_dato IN (4, 9) AND data_lettura::date = current_date
                                                                ORDER BY data_lettura ASC;`,
-            {
-                type: QueryTypes.SELECT
-            });
+        {
+            type: QueryTypes.SELECT
+        });
         console.log(dati_grafico);
         return res.status(200).json({
             error: false, message: "", data: [

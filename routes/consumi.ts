@@ -64,6 +64,13 @@ module.exports = function (app: any) {
 
     let refreshPromise: Promise<boolean> | null = null;
 
+    // Le API token/refreshToken in pratica rispondono senza result_code (a differenza della documentazione):
+    // la risposta è valida se result_code è "1" oppure, in sua assenza, se contiene i token
+    function isTokenResponseOk(data: any): boolean {
+        if (data?.result_code !== undefined) return data.result_code === "1";
+        return !!data?.result_data?.access_token && !!data?.result_data?.refresh_token;
+    }
+
     async function getTokenRecord() {
         const [record] = await db.select().from(token_sungrow).orderBy(asc(token_sungrow.id)).limit(1);
         return record;
@@ -112,7 +119,7 @@ module.exports = function (app: any) {
                 }
             );
             const resultCode = response.data?.result_code;
-            if (resultCode !== "1") {
+            if (!isTokenResponseOk(response.data)) {
                 console.error("Errore scambio code OAuth:", response.data);
                 const motivo = OAUTH_ERRORS[resultCode] ?? response.data?.result_msg ?? 'risposta non valida';
                 return res.status(502).send(`Errore Sungrow (${resultCode ?? '?'}): ${motivo}`);
@@ -260,7 +267,7 @@ module.exports = function (app: any) {
                     },
                 }
             );
-            if (response.data?.result_code !== "1") {
+            if (!isTokenResponseOk(response.data)) {
                 console.error("Refresh token rifiutato da Sungrow, serve una nuova autorizzazione OAuth:".red, response.data);
                 return false;
             }

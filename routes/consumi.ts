@@ -38,7 +38,7 @@ module.exports = function (app: any) {
             .from(letture_inverter)
             .where(and(
                 inArray(letture_inverter.id_dato, [4, 9]),
-                sql`${letture_inverter.data_lettura}::date = current_date`
+                sql`(${letture_inverter.data_lettura} AT TIME ZONE 'Europe/Rome')::date = (now() AT TIME ZONE 'Europe/Rome')::date`
             ))
             .orderBy(asc(letture_inverter.data_lettura));
         return res.status(200).json({
@@ -46,6 +46,70 @@ module.exports = function (app: any) {
                 { latestReadings: results },
                 { graphData: dati_grafico }
             ]
+        });
+    });
+
+    // tipo_dato con i contatori giornalieri (Wh, azzerati a mezzanotte) usati dal frontend per produzione e consumo
+    const ID_PRODUZIONE = 2;
+    const ID_CONSUMO = 7;
+
+    // Storico per la TV: anno in corso a confronto con l'anno precedente.
+    // Per ogni mese la somma dei totali giornalieri; il totale di un giorno è l'ultima lettura di quel giorno
+    // (non il massimo: subito dopo mezzanotte Sungrow può restituire ancora il totale del giorno prima).
+    // I totali dell'anno precedente sono calcolati anche sullo stesso periodo (1 gennaio -> stessa data di oggi)
+    // per confrontarli in modo equo con l'anno in corso.
+    app.get('/api/v1/storico', authorize([Role.Visualizzatore]), async (req: any, res: any) => {
+        const anno = Number(new Intl.DateTimeFormat('it-IT', { year: 'numeric', timeZone: 'Europe/Rome' }).format(new Date()));
+
+        const righe = (await db.execute(sql`
+            WITH letture AS (
+                SELECT id_dato, valore, data_lettura, (data_lettura AT TIME ZONE 'Europe/Rome')::date AS giorno
+                FROM letture_inverter
+                WHERE id_dato IN (${ID_PRODUZIONE}, ${ID_CONSUMO})
+                  AND data_lettura >= make_timestamptz(${anno}::int - 1, 1, 1, 0, 0, 0, 'Europe/Rome')
+            ),
+            totali_giornalieri AS (
+                SELECT DISTINCT ON (id_dato, giorno) id_dato, giorno, valore
+                FROM letture
+                ORDER BY id_dato, giorno, data_lettura DESC
+            )
+            SELECT extract(year FROM giorno)::int AS anno,
+                   extract(month FROM giorno)::int AS mese,
+                   id_dato,
+                   sum(valore) AS valore,
+                   sum(valore) FILTER (
+                       WHERE giorno <= ((now() AT TIME ZONE 'Europe/Rome')::date - interval '1 year')::date
+                   ) AS stesso_periodo
+            FROM totali_giornalieri
+            GROUP BY 1, 2, 3
+        `)).rows as { anno: number, mese: number, id_dato: number, valore: number | null, stesso_periodo: number | null }[];
+
+        const valore = (a: number, mese: number, idDato: number) =>
+            righe.find(r => r.anno === a && r.mese === mese && r.id_dato === idDato)?.valore ?? null;
+        const totale = (a: number, idDato: number, campo: 'valore' | 'stesso_periodo') =>
+            righe.filter(r => r.anno === a && r.id_dato === idDato).reduce((tot, r) => tot + (r[campo] ?? 0), 0);
+
+        const mesi = Array.from({ length: 12 }, (_, i) => ({
+            mese: i + 1,
+            produzione: valore(anno, i + 1, ID_PRODUZIONE),
+            consumo: valore(anno, i + 1, ID_CONSUMO),
+            produzionePrecedente: valore(anno - 1, i + 1, ID_PRODUZIONE),
+            consumoPrecedente: valore(anno - 1, i + 1, ID_CONSUMO),
+        }));
+
+        return res.status(200).json({
+            error: false, message: "", data: {
+                anno,
+                annoPrecedente: anno - 1,
+                mesi,
+                totali: {
+                    produzione: totale(anno, ID_PRODUZIONE, 'valore'),
+                    consumo: totale(anno, ID_CONSUMO, 'valore'),
+                    // anno precedente, stesso periodo dell'anno in corso
+                    produzionePrecedente: totale(anno - 1, ID_PRODUZIONE, 'stesso_periodo'),
+                    consumoPrecedente: totale(anno - 1, ID_CONSUMO, 'stesso_periodo'),
+                }
+            }
         });
     });
 
@@ -206,16 +270,15 @@ module.exports = function (app: any) {
                 ? await db.select({ id: tipo_dato.id, codice: tipo_dato.codice }).from(tipo_dato).where(inArray(tipo_dato.codice, codici))
                 : [];
 
-            const now = new Date();
-            const oraItaliana = new Date(now.setHours(now.getHours() + 1));
+            const dataLettura = new Date();
             const toNumber = (v: any) => (v === null || v === '' || isNaN(Number(v)) ? null : Number(v));
-            const nuoveLetture = tipi.map(td => ({ id_dato: td.id, valore: toNumber(letture[td.codice]), data_lettura: oraItaliana }));
+            const nuoveLetture = tipi.map(td => ({ id_dato: td.id, valore: toNumber(letture[td.codice]), data_lettura: dataLettura }));
             if (!nuoveLetture.length) {
                 console.warn("Nessun codice della risposta Sungrow corrisponde a tipo_dato:", codici);
                 return;
             }
             await db.insert(letture_inverter).values(nuoveLetture);
-            console.log(`Salvate ${nuoveLetture.length} letture alle ${oraItaliana.toISOString()}`);
+            console.log(`Salvate ${nuoveLetture.length} letture alle ${dataLettura.toISOString()}`);
 
             // notifica i client solo dopo che le letture sono state salvate
             wsDisponibili.forEach(ws => {

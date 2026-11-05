@@ -2,7 +2,8 @@ import { sql } from 'drizzle-orm';
 import { doublePrecision, foreignKey, index, integer, pgTable, serial, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 
 // Tabelle esistenti, allineate allo schema reale del DB (public). Per riverificarle: npm run db:pull
-// I timestamp sono "timestamp without time zone": drizzle li legge e li scrive come UTC.
+// letture_inverter.data_lettura è timestamptz (vedi db/migrations); not_valid_tokens.data_scadenza è un
+// "timestamp without time zone" che drizzle legge e scrive come UTC.
 
 export const dispositivi = pgTable('dispositivi', {
     // Nel DB il default è nextval('dispositivi'::regclass), che non è una sequence: va corretto con
@@ -23,8 +24,9 @@ export const letture_inverter = pgTable('letture_inverter', {
     id: integer('id').primaryKey().default(sql`nextval('letture_inverter_id_seq'::regclass)`),
     id_dato: integer('id_dato').notNull(),
     valore: doublePrecision('valore'),
-    data_lettura: timestamp('data_lettura').notNull(),
+    data_lettura: timestamp('data_lettura', { withTimezone: true }).notNull(),
 }, (table) => [
+    index('letture_inverter_id_dato_data_lettura_idx').on(table.id_dato, table.data_lettura),
     foreignKey({
         name: 'letture_inverter_tipo_dato_id_fk',
         columns: [table.id_dato],

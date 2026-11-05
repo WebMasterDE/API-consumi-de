@@ -100,34 +100,62 @@ export enum Role {
     Visualizzatore = 'Visualizzatore',
 }
 
+// Tipo del JWT (claim "type"): il refresh token vale solo per /refresh
+export enum TokenType {
+    Access = 'access',
+    Refresh = 'refresh',
+}
+
+// authenticate JWT token and attach user to request object (req.auth)
+// i token invalidati (logout, refresh già usati) sono salvati in not_valid_tokens con l'header Authorization completo
+function verifyJwt() {
+    return jwt({
+        secret: JWT_SECRET,
+        algorithms: ['HS256'],
+        isRevoked: async (req, token) => {
+            const payload: any = token?.payload;
+            const [revoked] = await db.select({ id: schema.not_valid_tokens.id })
+                .from(schema.not_valid_tokens)
+                .where(and(
+                    eq(schema.not_valid_tokens.id_utente, payload?.id),
+                    eq(schema.not_valid_tokens.token, req.headers.authorization ?? '')
+                ))
+                .limit(1);
+            return !!revoked;
+        }
+    });
+}
+
 export function authorize(roles: Role[] = []) {
     return [
-        // authenticate JWT token and attach user to request object (req.auth)
-        // i token invalidati dal logout sono salvati in not_valid_tokens con l'header Authorization completo
-        jwt({
-            secret: JWT_SECRET,
-            algorithms: ['HS256'],
-            isRevoked: async (req, token) => {
-                const payload: any = token?.payload;
-                const [revoked] = await db.select({ id: schema.not_valid_tokens.id })
-                    .from(schema.not_valid_tokens)
-                    .where(and(
-                        eq(schema.not_valid_tokens.id_utente, payload?.id),
-                        eq(schema.not_valid_tokens.token, req.headers.authorization ?? '')
-                    ))
-                    .limit(1);
-                return !!revoked;
-            }
-        }),
+        verifyJwt(),
 
         // authorize based on user role
         (req: any, res: any, next: any) => {
+            if (req.auth.type === TokenType.Refresh) {
+                return res.status(401).json({
+                    error: true,
+                    message: 'Token non valido per questa risorsa.'
+                });
+            }
             // authentication failed, missing role
             if (roles.length && !roles.includes(req.auth.role)) {
                 return res.status(401).json({
                     error: true,
                     message: 'Non sei autorizzato ad accedere a questa risorsa.'
                 });
+            }
+            next();
+        }
+    ];
+}
+
+export function authorizeRefresh() {
+    return [
+        verifyJwt(),
+        (req: any, res: any, next: any) => {
+            if (req.auth.type !== TokenType.Refresh) {
+                return res.status(401).json({ error: true, message: 'Refresh token non valido', data: [] });
             }
             next();
         }

@@ -3,7 +3,7 @@ import { Express } from 'express';
 
 export function listRoutes(app: Express) {
     const routes: any = [];
-    app._router.stack.forEach((middleware: any) => {
+    (app as any).router.stack.forEach((middleware: any) => {
         if (middleware.route) { // routes registered directly on the app
             routes.push(extractRoute(middleware));
         } else if (middleware.name === 'router') { // router middleware

@@ -1,13 +1,14 @@
-import { Sequelize } from 'sequelize';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { and, eq } from 'drizzle-orm';
 import express from 'express';
 import { listRoutes } from './utils';
 import 'colors';
 import { expressjwt as jwt } from "express-jwt";
 import passportHTTP from 'passport-http';
 import passport from 'passport';
-import { utenti } from './models/utenti';
+import * as schema from './db/schema';
 import bcrypt from 'bcrypt';
-import { initModels, token_sungrow } from "./models/init-models";
 import path from 'path';
 import helmet from "helmet";
 import cors from "cors";
@@ -21,7 +22,7 @@ import { env } from 'process';
 
 
 // check JWT_SECRET
-const dotenv = require('dotenv').config()
+const dotenv = require('dotenv').config({ quiet: true })
 
 if (dotenv.error) {
     console.log("Unable to load \".env\" file. Please provide one to store the JWT secret key".red);
@@ -37,30 +38,18 @@ if (!process.env.DB_NAME && !process.env.USERNAME_DB && !process.env.PW_DB && !p
 }
 
 
-export const sequelize_consumi_de = new Sequelize(
-    process.env.DB_NAME ?? '',
-    process.env.USERNAME_DB ?? '',
-    process.env.PW_DB,
-    {
-        host: process.env.DB_HOST,
-        port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 5432,
-        dialect: 'postgres',
-        logging: process.env.NODE_ENV === 'production' ? false : console.log,
-        pool: {
-            max: 20,
-            min: 0,
-            acquire: 30000,
-            idle: 10000
-        },
-        dialectOptions: {
-            connectTimeout: 60000
-        }
-    }
-);
+export const pool = new Pool({
+    database: process.env.DB_NAME,
+    user: process.env.USERNAME_DB,
+    password: process.env.PW_DB,
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 5432,
+    max: 20,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 60000
+});
 
-
-
-export const models = initModels(sequelize_consumi_de);
+export const db = drizzle({ client: pool, schema, logger: process.env.NODE_ENV !== 'production' });
 
 
 const app = express();
@@ -84,9 +73,7 @@ passport.use(new passportHTTP.BasicStrategy(
     function (user, password, done) {
         console.log("New login attempt from ".yellow + user);
 
-        utenti.findOne({
-            where: { username: user }
-        }).then(async (user) => {
+        db.select().from(schema.utenti).where(eq(schema.utenti.username, user)).limit(1).then(async ([user]) => {
 
             if (!user) {
                 return done({ statusCode: 401, error: true, errormessage: "Credenziali errate" });
@@ -101,10 +88,8 @@ passport.use(new passportHTTP.BasicStrategy(
                 return done({ statusCode: 401, error: true, errormessage: 'Email o password errate.' });
             }
         }).catch((err) => {
-
-            if (err) {
-                return done({ statusCode: 500, error: true, errormessage: err });
-            }
+            console.error("Errore DB durante il login:", err);
+            return done({ statusCode: 500, error: true, errormessage: "Errore durante il login" });
         })
     }
 ));
@@ -118,31 +103,38 @@ export enum Role {
 export function authorize(roles: Role[] = []) {
     return [
         // authenticate JWT token and attach user to request object (req.auth)
-        jwt({ secret: JWT_SECRET, algorithms: ['HS256'] }),
+        // i token invalidati dal logout sono salvati in not_valid_tokens con l'header Authorization completo
+        jwt({
+            secret: JWT_SECRET,
+            algorithms: ['HS256'],
+            isRevoked: async (req, token) => {
+                const payload: any = token?.payload;
+                const [revoked] = await db.select({ id: schema.not_valid_tokens.id })
+                    .from(schema.not_valid_tokens)
+                    .where(and(
+                        eq(schema.not_valid_tokens.id_utente, payload?.id),
+                        eq(schema.not_valid_tokens.token, req.headers.authorization ?? '')
+                    ))
+                    .limit(1);
+                return !!revoked;
+            }
+        }),
 
         // authorize based on user role
         (req: any, res: any, next: any) => {
-            console.log("Checking authorization of invalid-token".yellow);
-            if (roles.length && roles.includes(req.auth.role)) {
-                let find = false;
-                roles.forEach((role: Role) => {
-                    if (role === req.auth.role) find = true;
-                })
-                // authentication failed, missing role
-                if (!find) return res.status(401).json({
+            // authentication failed, missing role
+            if (roles.length && !roles.includes(req.auth.role)) {
+                return res.status(401).json({
                     error: true,
-                    message: 'Non sei autorizzato ad accedere a questa risorsa.2'
+                    message: 'Non sei autorizzato ad accedere a questa risorsa.'
                 });
             }
             next();
-
-
         }
     ];
 }
 
 app.use((req, res, next) => {
-    //decide to keep or not queries in console -> node_modules/sequelize/lib/sequelize.js line 552
     console.log("------------------------------------------------".inverse)
     console.log("New request for: " + req.url);
     console.log("Method: " + req.method);
@@ -162,7 +154,8 @@ require('./routes')(app);
 app.use(async function (err: any, req: any, res: any, next: any) {
     console.log("------------------------------------------------".inverse.red);
     console.log("headers");
-    console.log(req.headers);
+    // l'header Authorization contiene credenziali (Basic = password in base64) o token: non va nei log
+    console.log({ ...req.headers, authorization: req.headers.authorization ? '[nascosto]' : undefined });
     console.log("route.path");
     console.log(req.route?.path);
     if (typeof err === 'object') {
@@ -189,7 +182,7 @@ app.use(async function (err: any, req: any, res: any, next: any) {
 });
 
 let wsDisponibili: any[] = [];
-sequelize_consumi_de.authenticate()
+pool.query('SELECT 1')
     .then(() => {
         let server = http.createServer(app);
         const PORT = 3000;
@@ -214,4 +207,3 @@ export { wsDisponibili };
 
 
 
-// export default sequelize_app_installatori;

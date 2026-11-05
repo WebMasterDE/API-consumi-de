@@ -1,12 +1,11 @@
-FROM node:24.22.1
+FROM node:26.13.0
 
 WORKDIR /usr/src/app
 COPY package*.json ./
 
-RUN npm install\
-    && npm install pm2 -g \
-    && npm install -g typescript \
-    && npm install pg
+# typescript e gli altri tool di build sono nelle devDependencies del progetto
+RUN npm install \
+    && npm install pm2 -g
 
 COPY . .
 

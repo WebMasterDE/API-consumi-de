@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { doublePrecision, foreignKey, index, integer, pgTable, serial, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { date, doublePrecision, foreignKey, index, integer, pgTable, primaryKey, serial, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 
 // Tabelle esistenti, allineate allo schema reale del DB (public). Per riverificarle: npm run db:pull
 // letture_inverter.data_lettura è timestamptz (vedi db/migrations); not_valid_tokens.data_scadenza è un
@@ -32,6 +32,16 @@ export const letture_inverter = pgTable('letture_inverter', {
         columns: [table.id_dato],
         foreignColumns: [tipo_dato.id],
     }),
+]);
+
+// Totali giornalieri dallo storico Sungrow (vedi db/migrations/2026-11-05_storico_giornaliero.sql)
+export const storico_giornaliero = pgTable('storico_giornaliero', {
+    giorno: date('giorno').notNull(),
+    id_dato: integer('id_dato').notNull().references(() => tipo_dato.id),
+    valore: doublePrecision('valore').notNull(),
+    aggiornato_il: timestamp('aggiornato_il', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+    primaryKey({ columns: [table.id_dato, table.giorno] }),
 ]);
 
 export const not_valid_tokens = pgTable('not_valid_tokens', {

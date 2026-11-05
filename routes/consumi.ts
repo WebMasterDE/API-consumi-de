@@ -2,7 +2,7 @@ import { authorize, db, Role, wsDisponibili } from '../app';
 import axios from 'axios';
 import WebSocket from 'ws';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
-import { letture_inverter, tipo_dato, token_sungrow } from '../db/schema';
+import { letture_inverter, storico_giornaliero, tipo_dato, token_sungrow } from '../db/schema';
 
 
 let isFetching = false;
@@ -54,12 +54,15 @@ module.exports = function (app: any) {
     const ID_CONSUMO = 7;
 
     // Storico per la TV: anno in corso a confronto con l'anno precedente.
-    // Per ogni mese la somma dei totali giornalieri; il totale di un giorno è l'ultima lettura di quel giorno
-    // (non il massimo: subito dopo mezzanotte Sungrow può restituire ancora il totale del giorno prima).
-    // I totali dell'anno precedente sono calcolati anche sullo stesso periodo (1 gennaio -> stessa data di oggi)
-    // per confrontarli in modo equo con l'anno in corso.
+    // Per ogni mese la somma dei totali giornalieri. Il totale di un giorno viene dallo storico Sungrow
+    // (storico_giornaliero, vedi syncStorico); per i giorni che non ci sono ancora (oggi compreso) è l'ultima
+    // lettura di quel giorno (non il massimo: subito dopo mezzanotte Sungrow può restituire ancora il totale del giorno prima).
+    // Il confronto dei totali usa solo i mesi completi in entrambi gli anni: un mese entra se l'anno precedente ha
+    // il totale di tutti i suoi giorni (per il mese in corso, fino alla stessa data di oggi), così un anno con
+    // dati parziali (es. impianto avviato a metà anno) non falsa la percentuale.
     app.get('/api/v1/storico', authorize([Role.Visualizzatore]), async (req: any, res: any) => {
         const anno = Number(new Intl.DateTimeFormat('it-IT', { year: 'numeric', timeZone: 'Europe/Rome' }).format(new Date()));
+        const STESSA_DATA_ANNO_PRECEDENTE = sql`((now() AT TIME ZONE 'Europe/Rome')::date - interval '1 year')::date`;
 
         const righe = (await db.execute(sql`
             WITH letture AS (
@@ -68,26 +71,53 @@ module.exports = function (app: any) {
                 WHERE id_dato IN (${ID_PRODUZIONE}, ${ID_CONSUMO})
                   AND data_lettura >= make_timestamptz(${anno}::int - 1, 1, 1, 0, 0, 0, 'Europe/Rome')
             ),
-            totali_giornalieri AS (
+            da_letture AS (
                 SELECT DISTINCT ON (id_dato, giorno) id_dato, giorno, valore
                 FROM letture
                 ORDER BY id_dato, giorno, data_lettura DESC
+            ),
+            da_storico AS (
+                SELECT id_dato, giorno, valore
+                FROM storico_giornaliero
+                WHERE id_dato IN (${ID_PRODUZIONE}, ${ID_CONSUMO})
+                  AND giorno >= make_date(${anno}::int - 1, 1, 1)
+            ),
+            totali_giornalieri AS (
+                SELECT * FROM da_storico
+                UNION ALL
+                SELECT l.* FROM da_letture l
+                WHERE NOT EXISTS (SELECT 1 FROM da_storico s WHERE s.id_dato = l.id_dato AND s.giorno = l.giorno)
             )
             SELECT extract(year FROM giorno)::int AS anno,
                    extract(month FROM giorno)::int AS mese,
                    id_dato,
                    sum(valore) AS valore,
-                   sum(valore) FILTER (
-                       WHERE giorno <= ((now() AT TIME ZONE 'Europe/Rome')::date - interval '1 year')::date
-                   ) AS stesso_periodo
+                   sum(valore) FILTER (WHERE giorno <= ${STESSA_DATA_ANNO_PRECEDENTE}) AS stesso_periodo,
+                   count(*) FILTER (WHERE giorno <= ${STESSA_DATA_ANNO_PRECEDENTE})::int AS giorni_stesso_periodo
             FROM totali_giornalieri
             GROUP BY 1, 2, 3
-        `)).rows as { anno: number, mese: number, id_dato: number, valore: number | null, stesso_periodo: number | null }[];
+        `)).rows as { anno: number, mese: number, id_dato: number, valore: number | null, stesso_periodo: number | null, giorni_stesso_periodo: number }[];
 
-        const valore = (a: number, mese: number, idDato: number) =>
-            righe.find(r => r.anno === a && r.mese === mese && r.id_dato === idDato)?.valore ?? null;
-        const totale = (a: number, idDato: number, campo: 'valore' | 'stesso_periodo') =>
-            righe.filter(r => r.anno === a && r.id_dato === idDato).reduce((tot, r) => tot + (r[campo] ?? 0), 0);
+        const riga = (a: number, mese: number, idDato: number) =>
+            righe.find(r => r.anno === a && r.mese === mese && r.id_dato === idDato);
+        const valore = (a: number, mese: number, idDato: number) => riga(a, mese, idDato)?.valore ?? null;
+        const totale = (a: number, idDato: number) =>
+            righe.filter(r => r.anno === a && r.id_dato === idDato).reduce((tot, r) => tot + (r.valore ?? 0), 0);
+
+        // mesi confrontabili: l'anno in corso ha dati e l'anno precedente li ha per tutti i giorni del periodo
+        const parti = new Intl.DateTimeFormat('en-CA', { month: 'numeric', day: 'numeric', timeZone: 'Europe/Rome' }).formatToParts(new Date());
+        const meseOggi = Number(parti.find(p => p.type === 'month')!.value);
+        const giornoOggi = Number(parti.find(p => p.type === 'day')!.value);
+        const giorniNelMese = (a: number, mese: number) => new Date(Date.UTC(a, mese, 0)).getUTCDate();
+        const mesiConfronto = Array.from({ length: meseOggi }, (_, i) => i + 1).filter(mese => {
+            const giorniAttesi = mese < meseOggi
+                ? giorniNelMese(anno - 1, mese)
+                : Math.min(giornoOggi, giorniNelMese(anno - 1, mese));
+            return [ID_PRODUZIONE, ID_CONSUMO].every(idDato =>
+                valore(anno, mese, idDato) !== null && riga(anno - 1, mese, idDato)?.giorni_stesso_periodo === giorniAttesi);
+        });
+        const totaleConfronto = (a: number, idDato: number) => mesiConfronto.reduce((tot, mese) =>
+            tot + ((a === anno ? riga(a, mese, idDato)?.valore : riga(a, mese, idDato)?.stesso_periodo) ?? 0), 0);
 
         const mesi = Array.from({ length: 12 }, (_, i) => ({
             mese: i + 1,
@@ -102,12 +132,16 @@ module.exports = function (app: any) {
                 anno,
                 annoPrecedente: anno - 1,
                 mesi,
+                // mesi usati per il confronto (1-12), vuoto se l'anno precedente non ha nessun mese completo
+                mesiConfronto,
                 totali: {
-                    produzione: totale(anno, ID_PRODUZIONE, 'valore'),
-                    consumo: totale(anno, ID_CONSUMO, 'valore'),
-                    // anno precedente, stesso periodo dell'anno in corso
-                    produzionePrecedente: totale(anno - 1, ID_PRODUZIONE, 'stesso_periodo'),
-                    consumoPrecedente: totale(anno - 1, ID_CONSUMO, 'stesso_periodo'),
+                    produzione: totale(anno, ID_PRODUZIONE),
+                    consumo: totale(anno, ID_CONSUMO),
+                    // anno in corso e anno precedente sui soli mesiConfronto
+                    produzioneConfronto: totaleConfronto(anno, ID_PRODUZIONE),
+                    consumoConfronto: totaleConfronto(anno, ID_CONSUMO),
+                    produzionePrecedente: totaleConfronto(anno - 1, ID_PRODUZIONE),
+                    consumoPrecedente: totaleConfronto(anno - 1, ID_CONSUMO),
                 }
             }
         });
@@ -199,6 +233,7 @@ module.exports = function (app: any) {
                 return res.status(502).send("Errore Sungrow: risposta senza token");
             }
             getconsumi();
+            syncStorico();
             return res.status(200).send("Autorizzazione Sungrow completata. Puoi chiudere questa pagina.");
         } catch (error: any) {
             console.error("Errore scambio code OAuth:", error.response?.data ?? error);
@@ -297,6 +332,110 @@ module.exports = function (app: any) {
     setInterval(getconsumi, 5 * 60 * 1000);
 
     getconsumi();
+
+    // tipo_dato con totale giornaliero da sincronizzare dallo storico Sungrow (codice punto -> id_dato)
+    const PUNTI_STORICO: Record<string, number> = { p83022: ID_PRODUZIONE, p83118: ID_CONSUMO };
+    // giorni ricaricati a ogni sincronizzazione: Sungrow può completare i dati in ritardo
+    const GIORNI_RICARICATI = 7;
+    // l'API accetta al massimo 100 giorni per richiesta giornaliera
+    const GIORNI_PER_RICHIESTA = 90;
+
+    let isSyncingStorico = false;
+
+    // date come 'YYYY-MM-DD' (giorni dell'impianto, ora italiana); l'aritmetica si fa in UTC per evitare l'ora legale
+    const oggiRoma = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+    const aggiungiGiorni = (giorno: string, n: number) => {
+        const d = new Date(`${giorno}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + n);
+        return d.toISOString().slice(0, 10);
+    };
+
+    // Copia nel DB i totali giornalieri dello storico Sungrow, che restano completi anche quando il backend
+    // è fermo e le letture ogni 5 minuti si interrompono. Alla prima esecuzione parte da gennaio dell'anno
+    // precedente, poi ricarica solo gli ultimi giorni. Il giorno in corso non è mai nello storico Sungrow.
+    async function syncStorico() {
+        if (isSyncingStorico) return;
+        isSyncingStorico = true;
+        try {
+            const tokenRecord = await getTokenRecord();
+            if (!tokenRecord) return;
+
+            const idDati = Object.values(PUNTI_STORICO);
+            const [{ ultimo }] = (await db.execute(sql`
+                SELECT to_char(min(ultimo), 'YYYY-MM-DD') AS ultimo FROM (
+                    SELECT max(giorno) AS ultimo FROM storico_giornaliero
+                    WHERE id_dato IN (${sql.join(idDati, sql`, `)})
+                    GROUP BY id_dato
+                ) t
+            `)).rows as { ultimo: string | null }[];
+            const oggi = oggiRoma();
+            const ieri = aggiungiGiorni(oggi, -1);
+            let inizio = ultimo ? aggiungiGiorni(ultimo, -GIORNI_RICARICATI) : `${Number(oggi.slice(0, 4)) - 1}-01-01`;
+
+            let salvati = 0;
+            while (inizio <= ieri) {
+                const fine = [aggiungiGiorni(inizio, GIORNI_PER_RICHIESTA - 1), ieri].sort()[0];
+                let response;
+                try {
+                    response = await axios.post(
+                        `${SUNGROW_GATEWAY}/platform/getPowerStationPointDayMonthYearDataList`,
+                        {
+                            "appkey": process.env.APP_ID,
+                            "ps_id_list": [PS_ID],
+                            "query_type": "day",
+                            "data_type": "2", // per i contatori giornalieri il picco del giorno è il totale
+                            "data_point": Object.keys(PUNTI_STORICO).join(','),
+                            "start_time": inizio.replace(/-/g, ''),
+                            "end_time": fine.replace(/-/g, ''),
+                        },
+                        {
+                            headers: {
+                                'Authorization': `Bearer ${tokenRecord.access_token}`,
+                                'Content-Type': 'application/json',
+                                'x-access-key': process.env.SECRET_KEY,
+                            }
+                        }
+                    );
+                } catch (error: any) {
+                    // il refresh lo gestisce getconsumi; si riprova alla prossima sincronizzazione
+                    console.error("Errore storico Sungrow:", error.response?.status, error.response?.data ?? error.message);
+                    return;
+                }
+                if (response.data?.result_code !== "1") {
+                    console.error("Errore storico Sungrow:", response.data?.result_code, response.data?.result_msg);
+                    return;
+                }
+
+                const perPunto: Record<string, { time_stamp: string, [k: string]: string }[]> = response.data.result_data?.[PS_ID] ?? {};
+                const righe = Object.entries(perPunto).flatMap(([codice, valori]) =>
+                    PUNTI_STORICO[codice] === undefined ? [] : valori
+                        .filter(v => v["2"] !== undefined && v["2"] !== null && v["2"] !== '' && !isNaN(Number(v["2"])))
+                        .map(v => ({
+                            giorno: `${v.time_stamp.slice(0, 4)}-${v.time_stamp.slice(4, 6)}-${v.time_stamp.slice(6, 8)}`,
+                            id_dato: PUNTI_STORICO[codice],
+                            valore: Number(v["2"]),
+                        }))
+                );
+                if (righe.length) {
+                    await db.insert(storico_giornaliero).values(righe).onConflictDoUpdate({
+                        target: [storico_giornaliero.id_dato, storico_giornaliero.giorno],
+                        set: { valore: sql`excluded.valore`, aggiornato_il: sql`now()` },
+                    });
+                    salvati += righe.length;
+                }
+                inizio = aggiungiGiorni(fine, 1);
+            }
+            if (salvati) console.log(`Storico Sungrow: aggiornati ${salvati} totali giornalieri`);
+        } catch (error) {
+            console.error("Errore sincronizzazione storico:", error);
+        } finally {
+            isSyncingStorico = false;
+        }
+    }
+
+    setInterval(syncStorico, 3 * 60 * 60 * 1000);
+
+    syncStorico();
 
 
 

@@ -3,3 +3,5 @@
 **/README.md
 **/.editorconfig
 **/dist
+**/._*
+**/.DS_Store
